@@ -1,0 +1,2131 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+
+    <title>Food Access Security</title>
+
+    <script src="https://d3js.org/d3.v4.min.js"></script>
+    <script src="https://d3js.org/d3-scale-chromatic.v0.3.min.js"></script>
+    <script src="https://mbostock.github.com/d3/d3.js?2.5.0"></script>
+    <script src="https://www.jasondavies.com/parallel-sets/highlight.min.js"></script>
+
+<!-- The code from here till line 680 is from a library to create parallel sets created by jsondavies, ignore the code if you can, 
+    I had to include it here becuase I needed some customization in parallel sets code-->
+    <script>
+        // Parallel Sets by Jason Davies, http://www.jasondavies.com/
+        // Functionality based on http://eagereyes.org/parallel-sets
+        (function() {
+        d3.parsets = function() {
+            var event = d3.dispatch("sortDimensions", "sortCategories"),
+                dimensions_ = autoDimensions,
+                dimensionFormat = String,
+                tooltip_ = defaultTooltip,
+                categoryTooltip = defaultCategoryTooltip,
+                value_,
+                spacing = 20,
+                width,
+                height,
+                tension = 1,
+                tension0,
+                duration = 500;
+
+            function parsets(selection) {
+            selection.each(function(data, i) {
+                var g = d3.select(this),
+                    ordinal = d3.scale.ordinal(),
+                    dragging = false,
+                    dimensionNames = dimensions_.call(this, data, i),
+                    dimensions = [],
+                    tree = {children: {}, count: 0},
+                    nodes,
+                    total,
+                    ribbon;
+
+                d3.select(window).on("mousemove.parsets." + ++parsetsId, unhighlight);
+
+                if (tension0 == null) tension0 = tension;
+                g.selectAll(".ribbon, .ribbon-mouse")
+                    .data(["ribbon", "ribbon-mouse"], String)
+                .enter().append("g")
+                    .attr("class", String);
+                updateDimensions();
+                if (tension != tension0) {
+                var t = d3.transition(g);
+                if (t.tween) t.tween("ribbon", tensionTween);
+                else tensionTween()(1);
+                }
+
+                function tensionTween() {
+                var i = d3.interpolateNumber(tension0, tension);
+                return function(t) {
+                    tension0 = i(t);
+                    ribbon.attr("d", ribbonPath);
+                };
+                }
+
+                function updateDimensions() {
+                // Cache existing bound dimensions to preserve sort order.
+                var dimension = g.selectAll("g.dimension"),
+                    cache = {};
+                dimension.each(function(d) { cache[d.name] = d; });
+                dimensionNames.forEach(function(d) {
+                    if (!cache.hasOwnProperty(d)) {
+                    cache[d] = {name: d, categories: []};
+                    }
+                    dimensions.push(cache[d]);
+                });
+                dimensions.sort(compareY);
+                // Populate tree with existing nodes.
+                g.select(".ribbon").selectAll("path")
+                    .each(function(d) {
+                        var path = d.path.split("\0"),
+                            node = tree,
+                            n = path.length - 1;
+                        for (var i = 0; i < n; i++) {
+                        var p = path[i];
+                        node = node.children.hasOwnProperty(p) ? node.children[p]
+                            : node.children[p] = {children: {}, count: 0};
+                        }
+                        node.children[d.name] = d;
+                    });
+                tree = buildTree(tree, data, dimensions.map(dimensionName), value_);
+                cache = dimensions.map(function(d) {
+                    var t = {};
+                    d.categories.forEach(function(c) {
+                    t[c.name] = c;
+                    });
+                    return t;
+                });
+                (function categories(d, i) {
+                    if (!d.children) return;
+                    var dim = dimensions[i],
+                        t = cache[i];
+                    for (var k in d.children) {
+                    if (!t.hasOwnProperty(k)) {
+                        dim.categories.push(t[k] = {name: k});
+                    }
+                    categories(d.children[k], i + 1);
+                    }
+                })(tree, 0);
+                ordinal.domain([]).range(d3.range(dimensions[0].categories.length));
+                nodes = layout(tree, dimensions, ordinal);
+                total = getTotal(dimensions);
+                dimensions.forEach(function(d) {
+                    d.count = total;
+                });
+                dimension = dimension.data(dimensions, dimensionName);
+
+                var dEnter = dimension.enter().append("g")
+                    .attr("class", "dimension")
+                    .attr("transform", function(d) { return "translate(0," + d.y + ")"; })
+                    .on("mousedown.parsets", cancelEvent);
+                dimension.each(function(d) {
+                        d.y0 = d.y;
+                        d.categories.forEach(function(d) { d.x0 = d.x; });
+                    });
+                dEnter.append("rect")
+                    .attr("width", width)
+                    .attr("y", -45)
+                    .attr("height", 45);
+                var textEnter = dEnter.append("text")
+                    .attr("class", "dimension")
+                    .attr("transform", "translate(0,-25)");
+                textEnter.append("tspan")
+                    .attr("class", "name")
+                    .text(dimensionFormatName);
+                textEnter.append("tspan")
+                    .attr("class", "sort alpha")
+                    .attr("dx", "2em")
+                    .text("alpha »")
+                    .on("mousedown.parsets", cancelEvent);
+                textEnter.append("tspan")
+                    .attr("class", "sort size")
+                    .attr("dx", "2em")
+                    .text("size »")
+                    .on("mousedown.parsets", cancelEvent);
+                dimension
+                    .call(d3.behavior.drag()
+                        .origin(identity)
+                        .on("dragstart", function(d) {
+                        dragging = true;
+                        d.y0 = d.y;
+                        })
+                        .on("drag", function(d) {
+                        d.y0 = d.y = d3.event.y;
+                        for (var i = 1; i < dimensions.length; i++) {
+                            if (height * dimensions[i].y < height * dimensions[i - 1].y) {
+                            dimensions.sort(compareY);
+                            dimensionNames = dimensions.map(dimensionName);
+                            ordinal.domain([]).range(d3.range(dimensions[0].categories.length));
+                            nodes = layout(tree = buildTree({children: {}, count: 0}, data, dimensionNames, value_), dimensions, ordinal);
+                            total = getTotal(dimensions);
+                            g.selectAll(".ribbon, .ribbon-mouse").selectAll("path").remove();
+                            updateRibbons();
+                            updateCategories(dimension);
+                            dimension.transition().duration(duration)
+                                .attr("transform", translateY)
+                                .tween("ribbon", ribbonTweenY);
+                            event.sortDimensions();
+                            break;
+                            }
+                        }
+                        d3.select(this)
+                            .attr("transform", "translate(0," + d.y + ")")
+                            .transition();
+                        ribbon.filter(function(r) { return r.source.dimension === d || r.target.dimension === d; })
+                            .attr("d", ribbonPath);
+                        })
+                        .on("dragend", function(d) {
+                        dragging = false;
+                        unhighlight();
+                        var y0 = 45,
+                            dy = (height - y0 - 2) / (dimensions.length - 1);
+                        dimensions.forEach(function(d, i) {
+                            d.y = y0 + i * dy;
+                        });
+                        transition(d3.select(this))
+                            .attr("transform", "translate(0," + d.y + ")")
+                            .tween("ribbon", ribbonTweenY);
+                        }));
+                dimension.select("text").select("tspan.sort.alpha")
+                    .on("click.parsets", sortBy("alpha", function(a, b) { return a.name < b.name ? 1 : -1; }, dimension));
+                dimension.select("text").select("tspan.sort.size")
+                    .on("click.parsets", sortBy("size", function(a, b) { return a.count - b.count; }, dimension));
+                dimension.transition().duration(duration)
+                    .attr("transform", function(d) { return "translate(0," + d.y + ")"; })
+                    .tween("ribbon", ribbonTweenY);
+                dimension.exit().remove();
+
+                updateCategories(dimension);
+                updateRibbons();
+                }
+
+                function sortBy(type, f, dimension) {
+                return function(d) {
+                    var direction = this.__direction = -(this.__direction || 1);
+                    d3.select(this).text(direction > 0 ? type + " »" : "« " + type);
+                    d.categories.sort(function() { return direction * f.apply(this, arguments); });
+                    nodes = layout(tree, dimensions, ordinal);
+                    updateCategories(dimension);
+                    updateRibbons();
+                    event.sortCategories();
+                };
+                }
+
+                function updateRibbons() {
+                ribbon = g.select(".ribbon").selectAll("path")
+                    .data(nodes, function(d) { return d.path; });
+                ribbon.enter().append("path")
+                    .each(function(d) {
+                        d.source.x0 = d.source.x;
+                        d.target.x0 = d.target.x;
+                    })
+                    .attr("class", function(d) { return "category-" + d.major; })
+                    .attr("d", ribbonPath);
+                ribbon.sort(function(a, b) { return b.count - a.count; });
+                ribbon.exit().remove();
+                var mouse = g.select(".ribbon-mouse").selectAll("path")
+                    .data(nodes, function(d) { return d.path; });
+                mouse.enter().append("path")
+                    .on("mousemove.parsets", function(d) {
+                        ribbon.classed("active", false);
+                        if (dragging) return;
+                        highlight(d = d.node, true);
+                        showTooltip(tooltip_.call(this, d));
+                        d3.event.stopPropagation();
+                    });
+                mouse
+                    .sort(function(a, b) { return b.count - a.count; })
+                    .attr("d", ribbonPathStatic);
+                mouse.exit().remove();
+                }
+
+                // Animates the x-coordinates only of the relevant ribbon paths.
+                function ribbonTweenX(d) {
+                var nodes = [d],
+                    r = ribbon.filter(function(r) {
+                        var s, t;
+                        if (r.source.node === d) nodes.push(s = r.source);
+                        if (r.target.node === d) nodes.push(t = r.target);
+                        return s || t;
+                    }),
+                    i = nodes.map(function(d) { return d3.interpolateNumber(d.x0, d.x); }),
+                    n = nodes.length;
+                return function(t) {
+                    for (var j = 0; j < n; j++) nodes[j].x0 = i[j](t);
+                    r.attr("d", ribbonPath);
+                };
+                }
+
+                // Animates the y-coordinates only of the relevant ribbon paths.
+                function ribbonTweenY(d) {
+                var r = ribbon.filter(function(r) { return r.source.dimension.name == d.name || r.target.dimension.name == d.name; }),
+                    i = d3.interpolateNumber(d.y0, d.y);
+                return function(t) {
+                    d.y0 = i(t);
+                    r.attr("d", ribbonPath);
+                };
+                }
+
+                // Highlight a node and its descendants, and optionally its ancestors.
+                function highlight(d, ancestors) {
+                if (dragging) return;
+                var highlight = [];
+                (function recurse(d) {
+                    highlight.push(d);
+                    for (var k in d.children) recurse(d.children[k]);
+                })(d);
+                highlight.shift();
+                if (ancestors) while (d) highlight.push(d), d = d.parent;
+                ribbon.filter(function(d) {
+                    var active = highlight.indexOf(d.node) >= 0;
+                    if (active) this.parentNode.appendChild(this);
+                    return active;
+                }).classed("active", true);
+                }
+
+                // Unhighlight all nodes.
+                function unhighlight() {
+                if (dragging) return;
+                ribbon.classed("active", false);
+                hideTooltip();
+                }
+
+                function updateCategories(g) {
+                var category = g.selectAll("g.category")
+                    .data(function(d) { return d.categories; }, function(d) { return d.name; });
+                var categoryEnter = category.enter().append("g")
+                    .attr("class", "category")
+                    .attr("transform", function(d) { return "translate(" + d.x + ")"; });
+                category.exit().remove();
+                category
+                    .on("mousemove.parsets", function(d) {
+                        ribbon.classed("active", false);
+                        if (dragging) return;
+                        d.nodes.forEach(function(d) { highlight(d); });
+                        showTooltip(categoryTooltip.call(this, d));
+                        d3.event.stopPropagation();
+                    })
+                    .on("mouseout.parsets", unhighlight)
+                    .on("mousedown.parsets", cancelEvent)
+                    .call(d3.behavior.drag()
+                        .origin(identity)
+                        .on("dragstart", function(d) {
+                        dragging = true;
+                        d.x0 = d.x;
+                        })
+                        .on("drag", function(d) {
+                        d.x = d3.event.x;
+                        var categories = d.dimension.categories;
+                        for (var i = 0, c = categories[0]; ++i < categories.length;) {
+                            if (c.x + c.dx / 2 > (c = categories[i]).x + c.dx / 2) {
+                            categories.sort(function(a, b) { return a.x + a.dx / 2 - b.x - b.dx / 2; });
+                            nodes = layout(tree, dimensions, ordinal);
+                            updateRibbons();
+                            updateCategories(g);
+                            highlight(d.node);
+                            event.sortCategories();
+                            break;
+                            }
+                        }
+                        var x = 0,
+                            p = spacing / (categories.length - 1);
+                        categories.forEach(function(e) {
+                            if (d === e) e.x0 = d3.event.x;
+                            e.x = x;
+                            x += e.count / total * (width - spacing) + p;
+                        });
+                        d3.select(this)
+                            .attr("transform", function(d) { return "translate(" + d.x0 + ")"; })
+                            .transition();
+                        ribbon.filter(function(r) { return r.source.node === d || r.target.node === d; })
+                            .attr("d", ribbonPath);
+                        })
+                        .on("dragend", function(d) {
+                        dragging = false;
+                        unhighlight();
+                        updateRibbons();
+                        transition(d3.select(this))
+                            .attr("transform", "translate(" + d.x + ")")
+                            .tween("ribbon", ribbonTweenX);
+                        }));
+                category.transition().duration(duration)
+                    .attr("transform", function(d) { return "translate(" + d.x + ")"; })
+                    .tween("ribbon", ribbonTweenX);
+
+                categoryEnter.append("rect")
+                    .attr("width", function(d) { return d.dx; })
+                    .attr("y", -20)
+                    .attr("height", 20);
+                categoryEnter.append("line")
+                    .style("stroke-width", 2);
+                categoryEnter.append("text")
+                    .attr("dy", "-.3em");
+                category.select("rect")
+                    .attr("width", function(d) { return d.dx; })
+                    .attr("class", function(d) {
+                        return "category-" + (d.dimension === dimensions[0] ? ordinal(d.name) : "background");
+                    });
+                category.select("line")
+                    .attr("x2", function(d) { return d.dx; });
+                category.select("text")
+                    .text(truncateText(function(d) { return d.name; }, function(d) { return d.dx; }));
+                }
+            });
+            }
+
+            parsets.dimensionFormat = function(_) {
+            if (!arguments.length) return dimensionFormat;
+            dimensionFormat = _;
+            return parsets;
+            };
+
+            parsets.dimensions = function(_) {
+            if (!arguments.length) return dimensions_;
+            dimensions_ = d3.functor(_);
+            return parsets;
+            };
+
+            parsets.value = function(_) {
+            if (!arguments.length) return value_;
+            value_ = d3.functor(_);
+            return parsets;
+            };
+
+            parsets.width = function(_) {
+            if (!arguments.length) return width;
+            width = +_;
+            return parsets;
+            };
+
+            parsets.height = function(_) {
+            if (!arguments.length) return height;
+            height = +_;
+            return parsets;
+            };
+
+            parsets.spacing = function(_) {
+            if (!arguments.length) return spacing;
+            spacing = +_;
+            return parsets;
+            };
+
+            parsets.tension = function(_) {
+            if (!arguments.length) return tension;
+            tension = +_;
+            return parsets;
+            };
+
+            parsets.duration = function(_) {
+            if (!arguments.length) return duration;
+            duration = +_;
+            return parsets;
+            };
+
+            parsets.tooltip = function(_) {
+            if (!arguments.length) return tooltip;
+            tooltip = _ == null ? defaultTooltip : _;
+            return parsets;
+            };
+
+            parsets.categoryTooltip = function(_) {
+            if (!arguments.length) return categoryTooltip;
+            categoryTooltip = _ == null ? defaultCategoryTooltip : _;
+            return parsets;
+            };
+
+            var body = d3.select("body");
+            var tooltip = body.append("div")
+                .style("display", "none")
+                .attr("class", "parsets tooltip");
+
+            return d3.rebind(parsets, event, "on").value(1).width(960).height(600);
+
+            function dimensionFormatName(d, i) {
+            return dimensionFormat.call(this, d.name, i);
+            }
+
+            function showTooltip(html) {
+            var m = d3.mouse(body.node());
+            tooltip
+                .style("display", null)
+                .style("left", m[0] + 30 + "px")
+                .style("top", m[1] - 20 + "px")
+                .html(html);
+            }
+
+            function hideTooltip() {
+            tooltip.style("display", "none");
+            }
+
+            function transition(g) {
+            return duration ? g.transition().duration(duration).ease(parsetsEase) : g;
+            }
+
+            function layout(tree, dimensions, ordinal) {
+            var nodes = [],
+                nd = dimensions.length,
+                y0 = 45,
+                dy = (height - y0 - 2) / (nd - 1);
+            dimensions.forEach(function(d, i) {
+                d.categories.forEach(function(c) {
+                c.dimension = d;
+                c.count = 0;
+                c.nodes = [];
+                });
+                d.y = y0 + i * dy;
+            });
+
+            // Compute per-category counts.
+            var total = (function rollup(d, i) {
+                if (!d.children) return d.count;
+                var dim = dimensions[i],
+                    total = 0;
+                dim.categories.forEach(function(c) {
+                var child = d.children[c.name];
+                if (!child) return;
+                c.nodes.push(child);
+                var count = rollup(child, i + 1);
+                c.count += count;
+                total += count;
+                });
+                return total;
+            })(tree, 0);
+
+            // Stack the counts.
+            dimensions.forEach(function(d) {
+                d.categories = d.categories.filter(function(d) { return d.count; });
+                var x = 0,
+                    p = spacing / (d.categories.length - 1);
+                d.categories.forEach(function(c) {
+                c.x = x;
+                c.dx = c.count / total * (width - spacing);
+                c.in = {dx: 0};
+                c.out = {dx: 0};
+                x += c.dx + p;
+                });
+            });
+
+            var dim = dimensions[0];
+            dim.categories.forEach(function(c) {
+                var k = c.name;
+                if (tree.children.hasOwnProperty(k)) {
+                recurse(c, {node: tree.children[k], path: k}, 1, ordinal(k));
+                }
+            });
+
+            function recurse(p, d, depth, major) {
+                var node = d.node,
+                    dimension = dimensions[depth];
+                dimension.categories.forEach(function(c) {
+                var k = c.name;
+                if (!node.children.hasOwnProperty(k)) return;
+                var child = node.children[k];
+                child.path = d.path + "\0" + k;
+                var target = child.target || {node: c, dimension: dimension};
+                target.x = c.in.dx;
+                target.dx = child.count / total * (width - spacing);
+                c.in.dx += target.dx;
+                var source = child.source || {node: p, dimension: dimensions[depth - 1]};
+                source.x = p.out.dx;
+                source.dx = target.dx;
+                p.out.dx += source.dx;
+
+                child.node = child;
+                child.source = source;
+                child.target = target;
+                child.major = major;
+                nodes.push(child);
+                if (depth + 1 < dimensions.length) recurse(c, child, depth + 1, major);
+                });
+            }
+            return nodes;
+            }
+
+            // Dynamic path string for transitions.
+            function ribbonPath(d) {
+            var s = d.source,
+                t = d.target;
+            return ribbonPathString(s.node.x0 + s.x0, s.dimension.y0, s.dx, t.node.x0 + t.x0, t.dimension.y0, t.dx, tension0);
+            }
+
+            // Static path string for mouse handlers.
+            function ribbonPathStatic(d) {
+            var s = d.source,
+                t = d.target;
+            return ribbonPathString(s.node.x + s.x, s.dimension.y, s.dx, t.node.x + t.x, t.dimension.y, t.dx, tension);
+            }
+
+            function ribbonPathString(sx, sy, sdx, tx, ty, tdx, tension) {
+            var m0, m1;
+            return (tension === 1 ? [
+                "M", [sx, sy],
+                "L", [tx, ty],
+                "h", tdx,
+                "L", [sx + sdx, sy],
+                "Z"]
+            : ["M", [sx, sy],
+                "C", [sx, m0 = tension * sy + (1 - tension) * ty], " ",
+                    [tx, m1 = tension * ty + (1 - tension) * sy], " ", [tx, ty],
+                "h", tdx,
+                "C", [tx + tdx, m1], " ", [sx + sdx, m0], " ", [sx + sdx, sy],
+                "Z"]).join("");
+            }
+
+            function compareY(a, b) {
+            a = height * a.y, b = height * b.y;
+            return a < b ? -1 : a > b ? 1 : a >= b ? 0 : a <= a ? -1 : b <= b ? 1 : NaN;
+            }
+        };
+        d3.parsets.tree = buildTree;
+
+        function autoDimensions(d) {
+            return d.length ? d3.keys(d[0]).sort() : [];
+        }
+
+        function cancelEvent() {
+            d3.event.stopPropagation();
+            d3.event.preventDefault();
+        }
+
+        function dimensionName(d) { return d.name; }
+
+        function getTotal(dimensions) {
+            return dimensions[0].categories.reduce(function(a, d) {
+            return a + d.count;
+            }, 0);
+        }
+
+        // Given a text function and width function, truncates the text if necessary to
+        // fit within the given width.
+        function truncateText(text, width) {
+            return function(d, i) {
+            var t = this.textContent = text(d, i),
+                w = 250;
+            if (this.getComputedTextLength() < w) return t;
+            this.textContent = "…" + t;
+            var lo = 0,
+                hi = t.length + 1,
+                x;
+            while (lo < hi) {
+                var mid = lo + hi >> 1;
+                if ((x = this.getSubStringLength(0, mid)) < w) lo = mid + 1;
+                else hi = mid;
+            }
+            return lo > 1 ? t.substr(0, lo - 2) + "…" : "";
+            };
+        }
+
+        var percent = d3.format("%"),
+            comma = d3.format(",f"),
+            parsetsEase = "elastic",
+            parsetsId = 0;
+
+        // Construct tree of all category counts for a given ordered list of
+        // dimensions.  Similar to d3.nest, except we also set the parent.
+        function buildTree(root, data, dimensions, value) {
+            zeroCounts(root);
+            var n = data.length,
+                nd = dimensions.length;
+            for (var i = 0; i < n; i++) {
+            var d = data[i],
+                v = value(d, i),
+                node = root;
+            for (var j = 0; j < nd; j++) {
+                var dimension = dimensions[j],
+                    category = d[dimension],
+                    children = node.children;
+                node.count += v;
+                node = children.hasOwnProperty(category) ? children[category]
+                    : children[category] = {
+                    children: j === nd - 1 ? null : {},
+                    count: 0,
+                    parent: node,
+                    dimension: dimension,
+                    name: category
+                    };
+            }
+            node.count += v;
+            }
+            return root;
+        }
+
+        function zeroCounts(d) {
+            d.count = 0;
+            if (d.children) {
+            for (var k in d.children) zeroCounts(d.children[k]);
+            }
+        }
+
+        function identity(d) { return d; }
+
+        function translateY(d) { return "translate(0," + d.y + ")"; }
+
+        function defaultTooltip(d) {
+            var count = d.count,
+                path = [];
+            while (d.parent) {
+            if (d.name) path.unshift(d.name);
+            d = d.parent;
+            }
+            return path.join(" → ") + "<br>" + comma(count) + " (" + percent(count / d.count) + ")";
+        }
+
+        function defaultCategoryTooltip(d) {
+            return d.name + "<br>" + comma(d.count) + " (" + percent(d.count / d.dimension.count) + ")";
+        }
+        })();
+
+    </script>
+     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.0/css/bootstrap.min.css" integrity="sha384-9gVQ4dYFwwWSjIDZnLEWnxCjeSWFphJiwGPXr1jddIhOegiu1FwO5qRGvFXOdJZ4" crossorigin="anonymous">
+    <link rel="stylesheet" type="text/css" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css">
+    
+    
+    <link rel="stylesheet" type="text/css" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.6.3/css/font-awesome.min.css">
+    <script type="text/javascript" src="https://code.jquery.com/jquery-2.2.4.min.js"></script>
+    <script type="text/javascript" src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script>
+    <link rel="stylesheet" type="text/css" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.6.3/css/font-awesome.min.css">
+    <style>
+
+        @import "https://fonts.googleapis.com/css?family=Poppins:300,400,500,600,700";
+        @import url(http://www.jasondavies.com/parallel-sets/d3.parsets.css);
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: #fafafa;
+        }
+
+        p {
+            font-family: 'Poppins', sans-serif;
+            font-size: 1.1em;
+            font-weight: 300;
+            line-height: 1.7em;
+            color: #999;
+        }
+
+        a, a:hover, a:focus {
+            color: inherit;
+            text-decoration: none;
+            transition: all 0.3s;
+        }
+
+        #sidebar {
+            /* don't forget to add all the previously mentioned styles here too */
+            background: #7386D5;
+            transition: all 0.3s;
+            overflow: auto;
+        }
+
+        .wrapper {
+            display: flex;
+            width: 100%;
+            /*align-items: stretch;*/
+        }
+
+        .wrapper {
+            display: flex;
+            align-items: stretch;
+        }
+
+        #sidebar {
+            min-width: 250px;
+            max-width: 250px;
+        }
+
+        #sidebar.active {
+            /*margin-left: -250px;*/
+            min-width: 80px;
+            max-width: 80px;
+            text-align: center;
+        }
+
+        /* Toggling the sidebar header content, hide the big heading [h3] and showing the small heading [strong] and vice versa*/
+        #sidebar .sidebar-header strong {
+            display: none;
+        }
+        #sidebar.active .sidebar-header h3 {
+            display: none;
+        }
+        #sidebar.active .sidebar-header strong {
+            display: block;
+        }
+
+
+        /* Changing the arrow position to bottom center position, 
+        translateX(50%) works with right: 50% 
+        to accurately  center the arrow */
+        #sidebar.active .dropdown-toggle::after {
+            top: auto;
+            bottom: 10px;
+            right: 50%;
+            -webkit-transform: translateX(50%);
+            -ms-transform: translateX(50%);
+            transform: translateX(50%);
+        }
+
+        #sidebar {
+
+            width: 250px;
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 100vh;
+            z-index: 999;
+            background: white;
+            /*color: #fff;*/
+            transition: all 0.3s;
+        }
+
+        a[data-toggle="collapse"] {
+            position: relative;
+        }
+
+        .dropdown-toggle::after {
+            display: block;
+            position: absolute;
+            top: 50%;
+            right: 20px;
+            transform: translateY(-50%);
+        }
+
+        .slide {
+            margin-left: auto;
+        }
+
+        .panel-info > .panel-heading {
+            color: black;
+            background-color: #7386D5;
+        }
+
+        .panel-info {
+            overflow: hidden;
+            border: none;
+        }
+
+        .panel-heading.collapsed .fa-chevron-down,
+        .panel-heading .fa-chevron-right {
+        display: none;
+        }
+
+        .panel-heading.collapsed .fa-chevron-right,
+        .panel-heading .fa-chevron-down {
+        display: inline-block;
+        }
+
+        i.fa {
+        cursor: pointer;
+        margin-right: 5px;
+        }
+
+        .collapsed + .panel-body {
+        padding: 0;
+        }
+
+        .navbar {
+            position: unset;
+            min-height: unset;
+            margin-bottom: unset;
+            border: unset;
+        }
+
+        i.fa-collapse {
+            margin-right: unset;
+        }
+
+        /* Stackedbar and parallel sets style */
+            h1, h2, .dimension text {
+                text-align: center;
+                font-family: "PT Sans", Helvetica;
+                font-weight: 300;
+                font-size: 16px;
+            }
+            h1 {
+            font-size: 4em;
+            margin: .5em 0 0 0;
+            }
+            h2 {
+            font-size: 2em;
+            margin: 1em 0 0.5em;
+            border-bottom: solid #ccc 1px;
+            }
+            p.meta, p.footer {
+            font-size: 13px;
+            color: #333;
+            }
+            p.meta {
+            text-align: center;
+            }
+
+            text.icicle { pointer-events: none; }
+
+            .options { font-size: 12px; text-align: center; padding: 5px 0; }
+            .curves { float: left; }
+            .source { float: right; }
+            pre, code { font-family: "Menlo", monospace; }
+
+            .html .value,
+            .javascript .string,
+            .javascript .regexp {
+            color: #756bb1;
+            }
+
+            .html .tag,
+            .css .tag,
+            .javascript .keyword {
+            color: #3182bd;
+            }
+
+            .comment {
+            color: #636363;
+            }
+
+            .html .doctype,
+            .javascript .number {
+            color: #31a354;
+            }
+
+            .html .attribute,
+            .css .attribute,
+            .javascript .class,
+            .javascript .special {
+            color: #e6550d;
+            }
+
+            svg {
+                font: 10px sans-serif;
+            }
+
+            .axis path,
+            .axis line {
+                fill: none;
+                stroke: #000;
+            }
+            
+            path.domain {
+                stroke: none;
+            }
+            
+            .y .tick line {
+                stroke: #ddd;
+            }
+
+            .rightside {
+                width: calc(100% - 250px);
+                    position: absolute;
+                    top: 0;
+                    right: 0;
+                
+            }
+
+            .d3tooltip {
+                background-color: lightgrey;/*rgba(242, 242, 242, .6);*/
+                position: absolute;
+                padding: 5px;
+            }
+
+            svg tspan {
+                font-family: FontAwesome;
+            }
+    </style>
+
+
+</head>
+
+<body>
+    <script>
+
+        // Code to toggle the side bar to be hidden and shown
+        $(document).ready(function () {
+            $('#sidebarCollapse').on('click', function () {
+                $('#sidebar').toggleClass('active');
+                });
+
+        });
+    </script>
+
+    <div class="wrapper">
+        <!-- Sidebar -->
+        
+        <nav id="sidebar">
+
+            <div id="content">
+                <nav class="navbar navbar-expand-lg">
+                    <div class="slide">
+            
+                        <button type="button" id="sidebarCollapse" class="btn btn-info">
+                            <i class="fa fa-fw fa-align-justify fa-collapse"></i>
+                        </button>
+            
+                    </div>
+                </nav>
+            </div>
+
+            <!--Filters menu on the left side of the bar-->
+            <div class="panel panel-info">
+                
+                <div class="panel-heading" data-toggle="collapse" data-target="#bar1">
+                    <i class="fa fa-fw fa-chevron-down"></i>
+                    <i class="fa fa-fw fa-chevron-right"></i>USDA Metric
+                  </div>
+                  <div class="panel-body">
+                    <!-- The inside div eliminates the 'jumping' animation. -->
+                    <div class="collapse in" id="bar1">
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="USDA_Score" class="custom-control-input" id="usdascore">
+                            <label class="custom-control-label" for="usdascore">USDA Score</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q9" class="custom-control-input" id="bestFoodStatement">
+                            <label class="custom-control-label" for="bestFoodStatement">Perceived access to enough and preferred foods</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q10_1" class="custom-control-input" id="worryaboutmoney">
+                            <label class="custom-control-label" for="worryaboutmoney">Worry about having money to buy more food</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q10_2" class="custom-control-input" id="fooddidntlast">
+                            <label class="custom-control-label" for="fooddidntlast">Food bought didnt last and no money to buy more</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q10_3" class="custom-control-input" id="coudntaffordbalancediet">
+                            <label class="custom-control-label" for="coudntaffordbalancediet">Couldn't afford balanced diet</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q11_1" class="custom-control-input" id="eatlessthanreq">
+                            <label class="custom-control-label" for="eatlessthanreq">Eat less than enough due to lack of money</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q11_2" class="custom-control-input" id="hungryduetomoney">
+                            <label class="custom-control-label" for="hungryduetomoney">Hungry but didn't eat food due to lack of money</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q11_3" class="custom-control-input" id="skipmealsmoney">
+                            <label class="custom-control-label" for="skipmealsmoney">Had to skip meals due to lack of money</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q12_1" class="custom-control-input" id="wholedayfood">
+                            <label class="custom-control-label" for="wholedayfood">Didn't eat for whole day due to lack of money</label>
+                        </div>
+                    </div>
+                  </div>
+
+                  <div class="panel-heading collapsed" data-toggle="collapse" data-target="#bar">
+                    <i class="fa fa-fw fa-chevron-down"></i>
+                    <i class="fa fa-fw fa-chevron-right"></i>Academics
+                  </div>
+                  <div class="panel-body">
+                    <!-- The inside div eliminates the 'jumping' animation. -->
+                    <div class="collapse" id="bar">
+                      <div class="custom-control custom-checkbox">
+                          <input type="checkbox" value="Q3" class="custom-control-input" id="fullorparttime">
+                          <label class="custom-control-label" for="fullorparttime">Student enrollment status</label>
+                      </div>
+                      <div class="custom-control custom-checkbox">
+                          <input type="checkbox" value="Q5" class="custom-control-input" id="gradundergrad">
+                          <label class="custom-control-label" for="gradundergrad">Grad or Undergrad</label>
+                      </div>
+                      <div class="custom-control custom-checkbox">
+                          <input type="checkbox" value="Q6" class="custom-control-input" id="yearofstudy">
+                          <label class="custom-control-label" for="yearofstudy">Year of study</label>
+                      </div>
+                      <div class="custom-control custom-checkbox">
+                          <input type="checkbox" value="Q7" class="custom-control-input" id="transfer">
+                          <label class="custom-control-label" for="transfer">Transfer status</label>
+                      </div>
+                      <div class="custom-control custom-checkbox">
+                          <input type="checkbox" value="Q8" class="custom-control-input" id="levelofstudy">
+                          <label class="custom-control-label" for="levelofstudy">Current level of study</label>
+                      </div>
+                      <div class="custom-control custom-checkbox">
+                          <input type="checkbox" value="GPA" class="custom-control-input" id="gpa">
+                          <label class="custom-control-label" for="gpa">GPA</label>
+                      </div>
+                      <div class="custom-control custom-checkbox">
+                          <input type="checkbox" value="Q29" class="custom-control-input" id="major">
+                          <label class="custom-control-label" for="major">Major</label>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div class="panel-heading collapsed" data-toggle="collapse" data-target="#bar2">
+                    <i class="fa fa-fw fa-chevron-down"></i>
+                    <i class="fa fa-fw fa-chevron-right"></i>Food preferences
+                  </div>
+                  <div class="panel-body">
+                    <!-- The inside div eliminates the 'jumping' animation. -->
+                    <div class="collapse" id="bar2">
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q13" class="custom-control-input" id="reasonsnofood">
+                            <label class="custom-control-label" for="reasonsnofood">Reasons for not having enough food</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q14" class="custom-control-input" id="reasonskindoffood">
+                            <label class="custom-control-label" for="reasonskindoffood">Reasons for not having preferred foods</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q15" class="custom-control-input" id="placeofpurchase">
+                            <label class="custom-control-label" for="placeofpurchase">Food purchase locations</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q28" class="custom-control-input" id="servings">
+                            <label class="custom-control-label" for="servings">Food group consumption (24-hr recall)</label>
+                        </div>
+                    </div>
+                  </div>
+                  <div class="panel-heading collapsed" data-toggle="collapse" data-target="#bar3">
+                    <i class="fa fa-fw fa-chevron-down"></i>
+                    <i class="fa fa-fw fa-chevron-right"></i>Money Spent on food
+                  </div>
+                  <div class="panel-body">
+                    <!-- The inside div eliminates the 'jumping' animation. -->
+                    <div class="collapse" id="bar3">
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q21" class="custom-control-input" id="diningplan">
+                            <label class="custom-control-label" for="diningplan">Dining plan</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q20" class="custom-control-input" id="debtpayfood">
+                            <label class="custom-control-label" for="debtpayfood">Building debt to pay food (Y/N)</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q22" class="custom-control-input" id="nocredit">
+                            <label class="custom-control-label" for="nocredit">Unable to eat due to exhausted dining plan (Y/N)</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q23" class="custom-control-input" id="methodstoreducemoney">
+                            <label class="custom-control-label" for="methodstoreducemoney">Methods used to reduce food expenditure</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q26" class="custom-control-input" id="spendlessonbudget">
+                            <label class="custom-control-label" for="spendlessonbudget">Budget items reduced to buy food (Y/N)</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q27" class="custom-control-input" id="budgetitems">
+                            <label class="custom-control-label" for="budgetitems">What budget items do you spend less</label>
+                        </div>
+                    </div>
+                  </div>
+                  <div class="panel-heading collapsed" data-toggle="collapse" data-target="#bar4">
+                    <i class="fa fa-fw fa-chevron-down"></i>
+                    <i class="fa fa-fw fa-chevron-right"></i>Benefits program
+                  </div>
+                  <div class="panel-body">
+                    <!-- The inside div eliminates the 'jumping' animation. -->
+                    <div class="collapse" id="bar4">
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q24" class="custom-control-input" id="benefits">
+                            <label class="custom-control-label" for="benefits">Food assistance support from VT</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q25" class="custom-control-input" id="awayfrombenefits">
+                            <label class="custom-control-label" for="awayfrombenefits">Barriers to using benefits</label>
+                        </div>
+                    </div>
+                  </div>
+                  <div class="panel-heading collapsed" data-toggle="collapse" data-target="#bar5">
+                    <i class="fa fa-fw fa-chevron-down"></i>
+                    <i class="fa fa-fw fa-chevron-right"></i>Finances
+                  </div>
+                  <div class="panel-body">
+                    <!-- The inside div eliminates the 'jumping' animation. -->
+                    <div class="collapse" id="bar5">
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q32" class="custom-control-input" id="financial">
+                            <label class="custom-control-label" for="financial">Financial resources for tuition</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q33" class="custom-control-input" id="repayment">
+                            <label class="custom-control-label" for="repayment">Repayment required per year</label>
+                        </div>
+                    </div>
+                  </div>
+                  <div class="panel-heading collapsed" data-toggle="collapse" data-target="#bar6">
+                    <i class="fa fa-fw fa-chevron-down"></i>
+                    <i class="fa fa-fw fa-chevron-right"></i>Jobs
+                  </div>
+                  <div class="panel-body">
+                    <!-- The inside div eliminates the 'jumping' animation. -->
+                    <div class="collapse" id="bar6">
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q34" class="custom-control-input" id="gradAssistant">
+                            <label class="custom-control-label" for="gradAssistant">Grad assistantship</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q35" class="custom-control-input" id="durationAssistant">
+                            <label class="custom-control-label" for="durationAssistant">Duration of assistantship</label>
+                        </div>
+                    </div>
+                    <div class="collapse" id="bar6">
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q36" class="custom-control-input" id="jobOutsideAssis">
+                            <label class="custom-control-label" for="jobOutsideAssis">Job outside assistantship</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q37" class="custom-control-input" id="currentJob">
+                            <label class="custom-control-label" for="currentJob">Current Job</label>
+                        </div>
+                    </div>
+                  </div>
+                  <div class="panel-heading collapsed" data-toggle="collapse" data-target="#bar7">
+                    <i class="fa fa-fw fa-chevron-down"></i>
+                    <i class="fa fa-fw fa-chevron-right"></i>Personal Stats
+                  </div>
+                  <div class="panel-body">
+                    <!-- The inside div eliminates the 'jumping' animation. -->
+                    <div class="collapse" id="bar7">
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q41" class="custom-control-input" id="live">
+                            <label class="custom-control-label" for="live">Live</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q42" class="custom-control-input" id="inoutstate">
+                            <label class="custom-control-label" for="inoutstate">In-State and Out-of-state</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q43" class="custom-control-input" id="englishfirstlan">
+                            <label class="custom-control-label" for="englishfirstlan">English as first language (Y/N)</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q49" class="custom-control-input" id="insurance">
+                            <label class="custom-control-label" for="insurance">Health Insurance (Y/N)</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q50" class="custom-control-input" id="insurancepaid">
+                            <label class="custom-control-label" for="insurancepaid">Source of insurance premium payment</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q46" class="custom-control-input" id="age">
+                            <label class="custom-control-label" for="age">Age</label>
+                        </div>
+                    </div>
+                  </div>
+                  <div class="panel-heading collapsed" data-toggle="collapse" data-target="#bar8">
+                    <i class="fa fa-fw fa-chevron-down"></i>
+                    <i class="fa fa-fw fa-chevron-right"></i>Social Construction
+                  </div>
+                  <div class="panel-body">
+                    <!-- The inside div eliminates the 'jumping' animation. -->
+                    <div class="collapse" id="bar8">
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q51" class="custom-control-input" id="race">
+                            <label class="custom-control-label" for="race">Race</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q52" class="custom-control-input" id="disability">
+                            <label class="custom-control-label" for="disability">Disability</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q53" class="custom-control-input" id="disabilityeffects">
+                            <label class="custom-control-label" for="disabilityeffects">Disability affects food access (Y/N)</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q56" class="custom-control-input" id="sexcategories">
+                            <label class="custom-control-label" for="sexcategories">Sex categories</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox" value="Q57" class="custom-control-input" id="genderidentities">
+                            <label class="custom-control-label" for="genderidentities">Gender identities</label>
+                        </div>
+                        <div class="custom-control custom-checkbox">
+                            <input type="checkbox"  value="Q58" class="custom-control-input" id="sexualorientation">
+                            <label class="custom-control-label" for="sexualorientation">Sexual orientation</label>
+                        </div>
+                    </div>
+                  </div>
+                  <div style="margin-top: 5px;">
+                    <button type="button" class="btn btn-danger" onclick="resetClick()">Reset</button>
+                    <button type="button" class="btn btn-info" style="float: right;" onclick="buttonClick()">Apply</button>
+                  </div>
+                  
+              </div>
+
+        </nav>
+
+        <!-- Main content page on the right side -->
+        <div class="rightside">
+            <div style="background-color: white; display: flex; align-items: center;color: black;">
+                <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn%3AANd9GcQqE0K0RRS5_ZH3RnnDIjgqRt41AlXBQD_7YvprFgKEK8i_JLv_" alt="VT logo" width="135" height="65" style="padding: 3px 0px 3px 10px;">
+                    <div style="display: inline-block; font-weight: bold;padding-left: 10px;font-size: x-large;">Data Visualization Portal for the VT Food Access and Security Study</div>
+              </div>
+
+              <ul class="nav nav-tabs">
+                <li class="active"><a data-toggle="tab" href="#home">Stacked Bars</a></li>
+                <li><a data-toggle="tab" href="#menu1">Parallel Sets</a></li>
+              </ul>
+            <!--Tabs on the right side of the page-->
+              <div class="tab-content">
+                <div id="home" class="tab-pane fade in active">
+                    <div style="display: flex;">
+                        <!--Stacked bar area-->
+                        <div id="stackedbar">
+                        </div>
+                        <div id="textBoxArea">
+                           
+                        </div>
+                    </div>
+
+                </div>
+                <div id="menu1" class="tab-pane fade">
+                    <!--Parallel sets-->
+                    <div id="paralles">
+                        <div id="vis" style="margin-top: 10px;"><noscript><img src="parsets.png"></noscript></div>
+                    </div>
+                </div>
+              </div>
+                
+        </div>
+    </div>
+
+    <script>
+
+        var csv, csv2;
+        // Get data for the portal to show visualizations
+        d3.csv("Url1", function(data1) { 
+            d3.csv("Url2", function(data2) {
+                csv = data1;
+                csv2=data2;
+                startrender();
+
+            });
+        });
+        
+        // its the variable which will have all the filters that are selected by the user
+        let allow = [];
+        function buttonClick() {
+            startrender();
+            $("ul.nav li:first a").click();
+        }
+
+        function resetClick() {
+            $("input:checked").attr("checked", false);
+            startrender();
+        }
+        
+        // Static variables to the corresponding questions
+        // These variables are from the CSV file on how will the data will be read
+        let questions = ["Q3","Q5","Q6","Q7","Q8","Q9","Q10_1","Q10_2","Q10_3","Q11_1","Q11_2","Q11_3","Q12_1","Q13","Q14","Q15","Q20","Q21","Q22","Q23","Q24","Q25","Q26","Q27","Q29","Q32","Q33","Q34","Q35","Q36","Q37","Q41","Q42","Q43","Q49","Q50","Q51","Q52","Q53","Q56","Q57","Q58","Q46","Q28","GPA","USDA_Score"];
+        // Custome questions to be shown as filters in the filters section
+        let questionsText = [
+                "Student enrollment status", 
+                "Grad or Undergrad", 
+                "Year of study", 
+                "Transfer status", 
+                "Current level of study",
+                "Perceived access to enough and preferred foods", 
+                "Worry about having money to buy more food", 
+                "Food bought didnt last and no money to buy more", 
+                "Couldn't afford balanced diet", "Eat less than enough due to lack of money",
+                "Hungry but didn't eat food due to lack of money", 
+                "Had to skip meals due to lack of money", 
+                "Didn't eat for whole day due to lack of money",
+                "Reasons for not having enough food",
+                "Reasons for not having preferred foods" , 
+                "Food purchase locations", 
+                "Building debt to pay food (Y/N)", 
+                "Dining plan",
+                "Unable to eat due to exhausted dining plan (Y/N)", 
+                "Methods used to reduce food expenditure", 
+                "Food assistance support from VT", 
+                "Barriers to using benefits", 
+                "Budget items reduced to buy food (Y/N)", 
+                "What budget items do you spend less", 
+                "Major", 
+                "Financial resourses for tuition", 
+                "Repayment required per year", 
+                "Grad assistantship", 
+                "Duration of assistantship",
+                "Job outside assistantship", 
+                "Job", 
+                "Live",
+                "In-State and Out-of-state", 
+                "English as first language (Y/N)",
+                "Health Insurance (Y/N)", 
+                "Source of insurance premium payment", 
+                "Race", 
+                "Disability",
+                "Disability affects food access (Y/N)",
+                "Sex categories", 
+                "Gender identities",
+                "Sexual Orientation",
+                "Age",
+                "Food group consumption (24-hr recall)", 
+                "GPA",
+                "USDA Score"];
+
+        // Questions which will not have parallel set support due to multiple answers applicable for each datapoint 
+        let breakAnswers = ["Q13", "Q14", "Q15", "Q23", "Q25", "Q27", "Q28","Q32", "Q37", "Q50", "Q51"];
+        let fullQuestionsText = [
+            "Are you a full-time or part-time student at Virginia Tech?", 
+            "Are you an undergraduate or graduate student?",
+            "What year of undergraduate study are you in?",
+            "Did you transfer to Virginia Tech from another institution?",
+            "What is your current level of graduation study?",
+            "Which of these statements best describes the food eaten by you (or your dependents) in the last 12 months",
+            "For you or your household (dependents, spouse, partner, children) in the last 12 months are you worried whether your food would run out before you got money to buy more",
+            "For you or your household (dependents, spouse, partner, children) in the last 12 months did the food you bought didn’t last and you didn’t have enough money to buy more",
+            "For you or your household (dependents, spouse, partner, children) in the last 12 months did you feel that you couldn’t afford to eat balanced meals (i.e contained each of 5 food groups – vegetables, dairy, fruits, protein and grains)",
+            "For you or your household (dependents, spouse, partner, children) in the last 12 months ever eat less than you felt you should because there wasn’t enough money for food? ",
+            "For you or your household (dependents, spouse, partner, children) in the last 12 months were ever hungry but didn’t eat because there wasn’t enough money for food?",
+            "For you or your household (dependents, spouse, partner, children) in the last 12 months ever cut the size of the meals or skip meals because there wasn’t enough money for food?",
+            "In the last 12 months did you or any of your household (not including roommates) ever not asked for a whole day because there wasn’t enough money for food?",
+            "Here are some reasons why people don’t always have enough to eat. Select all options that contribute to you not having enough to eat.",
+            "Here are some reasons why people don’t always have the kinds of food they want or need. Select all the options that you feel explain why you don’t always have the kinds of food you want or need.",
+            "Where do you purchase the majority of the food you eat?",
+            "Are you building up debt to pay for food(e.g credit card you don’t pay away right off or student loans)",
+            "Do you currently have a dining plan?",
+            "Has there been a time in the last six months when you were unable to eat because you spent all the credit on your dining plan and couldn’t afford to add more?",
+            "Do you do any of the following to reduce the amount of money you spent on food (Check all that apply)",
+            "Have you (or your dependents) ever received benefits from any of the following assistance programs while you were a student at Virginia Tech (Check all that apply)?",
+            "What keeps you from using food assistance programs? (Check all that apply)",
+            "In the last 12 months, have you spent less on other budget items so that you can afford food?",
+            "What budget items do you spend less on so that you can afford food? (check all that apply)",
+            "What college is your primary major or degree program in?",
+            "What financial resources do you use to cover tuition, student fees, textbooks, and living expenses while attending Virginia tech? (Check all that apply)",
+            "How much do you receive per academic year from funding sources that require repayment (i.e student loans, loans from parents/family member)? Estimates are accepted",
+            "Are you on a graduate student assistant ship this semester(including teaching, research, or general)",
+            "What is the duration of your current assistantship?",
+            "Do you currently hold a job outside of assistant ship? (Check all that apply)",
+            "Do you currently have a job? (check all that apply)",
+            "Where do you live?",
+            "Are you classified as an in-state or out-state student?",
+            "Is English your first language?",
+            "Do you have a health Insurance?",
+            "How are your health insurance premiums paid for? (Check all that apply)",
+            "Which one or more of the following would you say is your race and/or ethnicity? (check all that apply)",
+            "Do you have a disability?",
+            "Do you feel that your disability affects your ability to access food?",
+            "Which of the following sex categories apply to you?",
+            "Which of the following gender identities apply to you?",
+            "Which of the following sexual orientations apply to you?",
+            "What is your age in years?",
+            "In the last 24 hours have you consumed at least one serving of foods in any of the following groups? (Check all that apply)	Starchy Staples (bread, rice, potatoes, etc)",
+            "GPA",
+            "USDA Score"];
+        // Possible answers to the questions, choices that are applicable for the questions these will be shown on the right side of the page
+        let questionAnswers = [
+            ["Part-time","Full-time","I do not attend Virginia Tech as a student"],
+            ["Undergraduate","Graduate (Degree-seeking or Certificate)"],
+            ["First-year / Freshman","Sophomore","Junior","Senior","5th - year Senior","Other(Specify)"],
+            ["Yes, I transferred from a 2-year community college program","Yes, I transferred from a 4-year college program","No"],
+            ["Master’s-level","Doctoral-level","Other(Specify)"],
+            ["I have enough food to eat and the kinds of food I want","I have enough food to eat but not always the kinds of food I want","Sometimes I don’t have enough to eat","Often, I don’t have enough to eat","Don’t know prefer not to answer"],
+            ["Often true","Sometimes true","Never true","Don’t Know / Prefer not to say"],
+            ["Often true","Sometimes true","Never true","Don’t Know / Prefer not to say"],
+            ["Often true","Sometimes true","Never true","Don’t Know / Prefer not to say"],
+            ["Yes, almost every month","Yes, sometimes but not every month","Yes, only 1 or 2 months","No","Don’t know"],
+            ["Yes, almost every month","Yes, sometimes but not every month","Yes, only 1 or 2 months","No","Don’t know"],
+            ["Yes, almost every month","Yes, sometimes but not every month","Yes, only 1 or 2 months","No","Don’t know"],
+            ["Yes, almost every month","Yes, sometimes but not every month","Yes, only 1 or 2 months","No","Don’t know"],
+            ["Not enough money for food","Too hard to get to the store","Elimination diet (paleo, Keto, vegan, vegetarian, etc.)","Food allergies","No working stove available","Not able to eat or cook because of health problems","Other(Specify)","Dont Know"],
+            ["Not enough money for food","Too hard to get to the store","Elimination diet (paleo, Keto, vegan, vegetarian, etc.)","Food allergies","Cultural foods I like to eat are not available","Kinds of food I want are not available","Good quality food not available","Other(Specify)","Don’t know"],
+            ["Grocery stores","Convenience stores","On campus dining","Farmers Market","Restaurant-off campus","Other"],
+            ["Yes","No","Don’t Know"],
+            ["No- I don’t have a dining plan through Virginia tech","Dining dollars only","Commute cash plan only","Minor flex plan","Major flex plan about 10 meals per week","Mega flex plan about 12 meals per week","Premium flex plan about 14 meals per week"],
+            ["Yes","No","Don't Know"],
+            ["I use coupons","I purchase sale items","I go to grocery store where the food is cheaper","I buy less of a certain food group(specify)","I have a grocery store membership or frequent shopper card","I buy a smaller quantity of expensive foods","I avoid purchasing expensive foods altogether","I attend free-food events on campus","Other (Specify)"],
+            ["No, I have never participated in any of the food assistance programs","Emergency food(church, food pantry,/bank , or emergency kitchen). If yes, please specify","WIC (Women, Infants & children Supplemental Nutrition program)","Government funded program (e.g, SNAP, food stamps)","Emergency assistance from the dean of the students office","Medicaid or public health insurance","Tax refunds","Housing Assistance","Utility Assistance","Social Security Disability Insurance","Child care assistance","Veterans benefits","Unemployment compensation/insurance","Supplemental security income","Temporary assistance for needy families","Other(Specify)"],
+            ["No food bank/pantry is convenient for me to buy food","SNAP benefits are not accepted where it is convenient for me to buy food","I worry about what people will think","I have not heard of food assistance programs available to me","I am not sure if I am eligible for food assistance programs","I don’t know who to talk to on campus to find out what resources are available to me","Other people need more assistance than I do","I do not feel comfortable using a religiously affiliated food bank/pantry"],
+            ["Yes","No","Don't Know"],
+            ["Housing (rent, mortgage, utilities)","Transportation","Eating/going out","Entertainment","Non-food sopping","Cell phone","One-time large purchases","Travel","Automotive","Tuition","Student fees","Textbooks","Other (specify)"],
+            ["College of Agriculture engineering and life sciences", "etc. others"],
+            ["Personal Savings","Parents/Family Member – no repayment required", "Parents/Family Member – repayment required", "Pell Grant", "Grant", "Scholarship", "Student loan", "Line of credit","VT assistant stipend", "Other (Specify)"],
+            ["< $5000", "$5000 - $9999", "$10000 - $14999", "$15000 - $19999", "$20000", "Don’t Know"],
+            ["Yes,10 hours","Yes, 20 hours","No and I have never been on an assistantship ", "No, but I was previously on an assistantship"],
+            ["5-month assistantship","29-month assistantship","12-month assistantship","Other (Specify)"],
+            ["Part-time, on-campus","Full-time, on-campus", "Part-time, off-campus", "Full-time, off-campus", "Assistantship (GA, GTA, GRA) only and not looking for additional employment","Assistantship (GA, GTA, GRA) only and looking for additional employment"],
+            ["Part-time, on-campus", "Full-time, on-campus","Part-time, off-campus","Full-time, off-campus","I do not currently have a job, and I am not looking for one","I do not currently have a job, and I am looking for one"],
+            ["Off campus by myself","Off campus with parents/guardians","Off campus with room mates","Off campus with spouse/partner/dependents","On-campus","Other(Specify)"],
+            ["In-state Student","Out-of-state student: domestic","Out-of-state student: International"],
+            ["Yes","No","Don’t Know"],
+            ["Yes","No","Not sure"],
+            ["I pay-out-pocket for my health insurance","My parents plan","My employer","My spouse or partner","Virginia Tech Assistantship","Virginia health plan/ state children’s health insurance program","Other (Specify)"],
+            ["American Indian or Alaskan Native","Asian","Black or African American","Caribbean", "Hispanic or Latino", "Middle Eastern or North African","Native Hawaiian or Pacific Islander","Sub-Saharan African","White or Caucasian","Self-identify as another race/ethnicity (Specify)"],
+            ["Yes","No","Maybe","Prefer not to say"],
+            ["Yes","No","Don’t Know"],
+            ["Male","Female","Intersex (Please specify)"],
+            ["Masculine","Feminine","Trans/Transgender","Gender Non-Conforming","Questioning","Self-identifying as another gender identify (please specify)","Prefer not to say"],
+            ["Lesbian","Gay","Bisexual","Queer","Questioning","Heterosexual","Self-Identify as another sexual orientation (please specify)","Prefer not to say"],
+            ["Specify ()"],
+            ["Starchy Staples (bread, rice, potatoes, etc)","Legumes and nuts (lentis, beans, peas, peanuts etc.)","Dairy (milk, cheese, yogurt, etc.)","Organ meat (liver, kidney, gizzards)","Eggs (hen, fish, or other)","Flesh foods or other small animal protein (beef, perk, lamb, veal, goat, poultry","Fish (including shrimp/prawns)","Dark green leafy vegetables","Vitamin C rich fruits (strawberries, citrus, pineapple, mango, lychee, guava)","Red/orange/yellow fruits (Mango, papaya, oranges)","Red/orange/yellow vegetables (sweet potato, pumpkin, carrots, peppers)","Vitamin C rich Vegetables (broccoli, squach, cauliflower, tomatoes, green cabbage)","Other fruits and vegetables (turnips, bananas, apples)","Edible Oil (Including butter and margarine)","Condiment and spices","Miscellaneous (tea, soft drinks, juice, coffee)"],
+            ["0","1","2","3","4","5"],
+            [
+                "High food security (No indications of limitations to food access)",
+                "Marginal food security (one or two indications of food insecurity in terms of anxities over insufficient food in the house. There are little to no changes in diets or food access.)",
+                "Low food security (Some indications of food insecurity - reports of reduced diet quality, variety, and/or desirability. Little to no indication of reduced food intake.)",
+                "Very low Food security(Multiple indications of food insecurity inclusing disrupted eating patterns and reduced foor intake)"
+            ]
+        ];
+
+        // Count for multiple answer questions will be different because to show them in the stackedbar plot we need the count so that we can
+        // draw the rectangles in the same range as normal ones
+        let countOfBreakAnswers = [];
+        let selectedAxiss = [];
+        let filteredData = [];
+        let filterDataQuestions = [];
+        let filterDataQuestionAnswers = {};
+        var svg,tooltip;
+        let windowWidthAvailable = window.screen.width - 250;
+        let windowHeightAvailable = window.screen.height - 255;
+
+        function startrender() {
+
+                allow = [];
+                selectedAxiss = [];
+                filteredData = [];
+                filterDataQuestions = [];
+                filterDataQuestionAnswers = {};
+                countOfBreakAnswers = [];
+                let elements = $( "input:checked" );
+                let filters = [];
+                for(let i=0; i< elements.length; i++) {
+                    filters.push(elements[i].value);
+                }
+                //console.log(filters);
+                allow = filters;
+                
+                // If applied filters are more than 8 we need more height to render that supports overflow in the page.
+                if(allow.length > 8) {
+                    windowHeightAvailable = (60 * allow.length) + 100; 
+                }
+                
+                // In d3 remove the existing svgs before drawing the new ones
+                d3.select("#stackedbar").selectAll('svg').remove();
+                d3.select("#vis").selectAll('svg').remove();
+                d3.select("#textBoxArea").selectAll("*").remove();
+                 svg = d3.select("#stackedbar").append("svg")
+                    .attr("width", (windowWidthAvailable * 0.75) + 30)
+                    .attr("height", windowHeightAvailable);
+
+                    // tooltip code 
+                    tooltip = svg.append("g")
+                        .attr("class", "d3tooltip")
+                        .style("display", "none");
+                            
+                        tooltip.append("rect")
+                        .attr("width", 30)
+                        .attr("height", 20)
+                        .attr("fill", "white")
+                        .style("opacity", 0.5);
+
+                        tooltip.append("text")
+                        .attr("x", 15)
+                        .attr("dy", "1.2em")
+                        .style("text-anchor", "middle")
+                        .attr("font-size", "12px")
+                        .attr("font-weight", "bold");
+            
+
+                let len = csv2.length;
+                let data={}
+
+                // GPA is binned to nearest integers
+                    for(let i=0; i<len ;i++) {
+                        if(csv[i]["Q40"] !== "") {
+                            if(csv[i]["Q40"] > "3") {
+                                csv[i]["GPA"] = "4";
+                            } else if (csv[i]["Q40"] > "2" && csv[i]["Q40"] <= "3") {
+                                csv[i]["GPA"] = "3";
+                            }
+                            else if (csv[i]["Q40"] > "1" && csv[i]["Q40"] <= "2") {
+                                csv[i]["GPA"] = "2";
+                            }
+                            else if(csv[i]["Q40"] > "0" && csv[i]["Q40"] <= "1") {
+                                csv[i]["GPA"] = "1";
+                            }
+                            else {
+                                csv[i]["GPA"] = csv[i]["Q40"];
+                            }
+                        }
+                        else {
+                            csv[i]["GPA"] = csv[i]["Q40"];
+                        }
+
+                        csv[i]["Degree"] = csv[i]["Q5"];
+                        csv[i]["Year"] = csv[i]["Q6"];
+                        
+                        // USDA score calculation from the data, it is a derived value from the dataset
+                        csv[i]["USDA_Score"] = USDA_score(csv2[i]["Q10_1"],csv2[i]["Q10_2"],csv2[i]["Q10_3"],csv2[i]["Q11_1"],csv2[i]["Q11_2"],csv2[i]["Q11_3"],csv2[i]["Q12_1"]);
+                
+                        
+                    }
+
+                   // Counting the categories and the respective values for the stacked bar plot graph
+                    for(let i=0; i< allow.length;i++) {
+                            let key  = allow[i];
+                            if(!data[key]) {
+                                data[key] = {};
+                            }
+
+
+                            if(breakAnswers.includes(key)) {
+                                let breakcount = 0;
+                                for(let j=0; j< csv.length; j++) {
+                                    // Some answers contain junk values, need to remove them
+                                    // like Fruits(orange, apple, etc.) => Fruits
+                                    const regex = /\((\w+,\s)+\w+\.?\)/g;
+                                    let left = csv[j][key].replace(regex, "");
+                                    let keyAnswers = left.split(",");
+                                    breakcount = breakcount + keyAnswers.length;
+                                    for(let k=0; k< keyAnswers.length;k++) {
+                                        if(!data[key][keyAnswers[k]]) {
+                                            data[key][keyAnswers[k]] = 1
+                                        }
+                                        else {
+                                            data[key][keyAnswers[k]]++;
+                                        }
+                                    }
+                                    
+                                }
+
+                                countOfBreakAnswers.push(breakcount);
+                            }
+                            else {
+                                for(let j=0; j< csv.length; j++) {
+                                    if(!data[key][csv[j][key]]) {
+                                        data[key][csv[j][key]] = 1
+                                    }
+                                    else {
+                                        data[key][csv[j][key]]++;
+                                    }
+                                }
+                            }
+                    }
+
+                    let count = 0;
+                    let initial = 30;
+                    let renderLater = [];
+
+                    // Drawing rectangles from here
+                    for(let i=0; i< allow.length;i++) {
+
+                            // Drwaing all the non parallel sets supporting categories to the end of the list
+                            if(breakAnswers.indexOf(allow[i]) == -1) {
+                                render(data[allow[i]],allow[i], initial,svg, csv.length, csv);
+                                count++;
+                                initial  = initial + 60;
+                            }
+                            else {
+                                renderLater.push(allow[i]);
+                            }
+                    }
+
+
+                    // Drawing non parallel sets support stacked bars                    
+                    if(renderLater.length > 0) {
+
+                        svg.append("text")
+                        .attr("x",30 )
+                        .attr("y",initial + 20 )
+                        .attr("font-family","'Poppins', sans-serif;")
+                        .attr("font-size","30px")
+                        .style("fill","#000000")
+                        .text("Parallel sets Non Compliant");
+
+                        initial  = initial + 60;
+
+                        for(let i=0; i< renderLater.length; i++) {
+                            render(data[renderLater[i]],renderLater[i], initial,svg, csv.length, csv, renderLater);
+                            count++;
+                            initial  = initial + 60;
+                        }
+                    }
+
+                    renderTableArea();
+                    parallel_sets(csv);
+                }
+
+
+
+            // USDA score calculation from the data, it is a derived value from the dataset
+                function USDA_score(a_1,a_2,a_3,b_1,b_2,b_3,c_1) {
+
+                    if(a_1 && a_1 !== "") {
+                        a_1 = (parseInt(a_1) <= 2) ? 1 : 0;
+                    }
+                    else {
+                        a_1 = 0;
+                    }
+
+                    if(a_2 && a_2 !== "") {
+                        a_2 = (parseInt(a_2) <=2) ? 1 : 0;
+                    }
+                    else {
+                        a_2 = 0;
+                    }
+
+                    if(a_3 && a_3 !== "") {
+                        a_3 = (parseInt(a_3) <= 2) ? 1 : 0;
+                    }
+                    else {
+                        a_3 = 0;
+                    }
+
+                    if(b_3 && b_3 !== "") {
+                        b_3 = parseInt(b_3);
+                        if(b_3 ===  4 || b_3 === 5) {
+                            b_3 = 0;
+                        }
+                        else if(b_3 ===  3) {
+                            b_3 = 1;
+                        }
+                        else if(b_3 <=  2) {
+                            b_3 = 2;
+                        }
+                    }
+                    else {
+                        b_3 = 0;
+                    }
+
+                    if(b_2 && b_2 !== "") {
+                        b_2 = (parseInt(b_2) <= 3) ? 1 : 0;
+                    }
+                    else {
+                        b_2 = 0;
+                    }
+
+                    if(b_1 && b_1 !== "") {
+                        b_1 = (parseInt(b_1) <= 3) ? 1 : 0;
+                    }
+                    else {
+                        b_1 = 0;
+                    }
+
+                    if(c_1 && c_1  !== "") {
+                        c_1 = parseInt(c_1);
+                        if(c_1 ===  4 || c_1 === 5) {
+                            c_1 = 0;
+                        }
+                        else if(c_1 ===  3) {
+                            c_1 = 1;
+                        }
+                        else if(c_1 <=  2) {
+                            c_1 = 2;
+                        }
+                    }
+                    else {
+                        c_1 = 0;
+                    }
+
+                    let usdascore = a_1 + a_2 + a_3 + b_1 + b_2 + b_3 + c_1;
+
+                    if(usdascore == 0) {
+                        return "High food security";
+                    }
+                    else if(usdascore == 1 || usdascore == 2) {
+                        return "Marginal food security";
+                    }
+                    else if(usdascore >=3 && usdascore <= 5) {
+                        return "Low food security";
+                    }
+                    else if(usdascore >= 6 && usdascore <= 9) {
+                        return "Very low food security";
+                    }
+
+                    return usdascore.toString();    
+                }
+
+                // colors for stacked bar chart
+                var colors = [/*"red",*/"#1f78b4","#a6cee3","#33a02c","#b2df8a","#fb9a99","#fdbf6f","#ff7f00","#cab2d6","#6a3d9a","#ffff99","#b15928", "#d25c4d", "#f2b447", "#d9d574", "blue", "green"];
+                let redColor = "red";
+                function render(data, key, y,svg, totalount, csv, renderLater) {
+                    let keys = Object.keys(data).sort(function(a,b){
+                        if (a == "") {
+                            return 1;
+                        }
+                        else if (b == "") {
+                            return -1;
+                        }
+                            return data[b]-data[a]
+                        });
+                    // Customization for USDA metric wanted order in a specific way
+                    if(key == "USDA_Score") {
+                        let temp = keys[1];
+                        keys[1] = keys[2];
+                        keys[2] = temp;
+                    }
+
+                    let x = 30;
+                    svg.append("text")
+                        .attr("x",x )
+                        .attr("y",y )
+                        .attr("font-family","'Poppins', sans-serif;")
+                        .attr("font-size","initial")
+                        .style("fill","#000000")
+                        .text(function() {
+                            let index = questions.indexOf(key);
+                            
+                            if(index!=0 && (!index || index >= questionsText.length)) {
+                                
+                                return key + " ";
+                            }
+                            return questionsText[index] + " ";
+                        })
+                        .append("tspan")
+                        .text("\uf05a")
+                        .append("title")
+                        .text("Click on the rectangles to filter the data in parallel sets section");
+
+                    y = y + 10;
+                    
+                    let maxWidth = windowWidthAvailable * 0.75;
+                    for(let i=0; i< keys.length; i++) {
+                        let width = (data[keys[i]]/4101) * maxWidth;
+
+                        if(breakAnswers.includes(key)) {
+                            width = (data[keys[i]]/countOfBreakAnswers[renderLater.indexOf(key)]) * maxWidth;
+                        }
+
+                        svg.append("rect")
+                            .attr("x", x)
+                            .attr("y", y)
+                            .attr("height", 20)
+                            .attr("Question", key)
+                            .attr("Choice", keys[i])
+                            .attr("width", width)
+                            .on("mouseover", function() { tooltip.style("display", null); })
+                            .on("mouseout", function() { tooltip.style("display", "none"); })
+                            .on("click", function(d) {
+                            let currentColor = "#000000";
+                            let outlineStyle = d3.select(this).style("outline-style");
+                            let removeSelection = false;
+                                if(outlineStyle == "solid") {
+                                    d3.select(this).style("outline-style", "none").style("outline-width","0px");
+                                    removeSelection = true;
+                                }
+                                else {
+                                    d3.select(this).style("outline-style", "solid").style("outline-color",currentColor).style("outline-width","2px");
+                                }
+                                
+                                let question = d3.select(this).attr("Question");
+                                let choice = d3.select(this).attr("Choice");
+                                if(removeSelection) {
+                                    // If the selection is being removed by the user (undone) we need to add back the data that is filtered
+                                    // previously because of the selection
+                                    addFilteredData(question, choice, csv);
+                                }
+                                else {
+                                    filterData(question, choice, csv);
+                                }
+                            })
+                            .style("fill", 
+                                function() {
+                                    if(keys[i] == "") {
+                                        return redColor;
+                                    }
+                                    return colors[i];
+                                })
+                            .style("opacity", "0.6")
+                            .on("mousemove", function(d) {
+                                // Tool tip position as per mouse position
+                                var xPosition = d3.mouse(this)[0] - 15;
+                                var yPosition = d3.mouse(this)[1] - 25;
+                                tooltip.attr("transform", "translate(" + xPosition + "," + yPosition + ")");
+                                tooltip.select("text").text( function(d) {
+                                    if(keys[i] != ""){
+                                        return (keys[i] + "(" + data[keys[i]] +")");
+                                }
+                                else {
+                                    return ("No answer" + "(" + data[keys[i]] +")");
+                                }
+                                });
+                            });
+
+                            x = x + width;
+                        }
+
+                        
+                    }
+
+                // Drawing Right side of the page where we explain the questions and possible choices
+                function renderTableArea() {
+                    let element = d3.select("#textBoxArea")
+                                    .style("width", "100%")
+                                    .style("height",windowHeightAvailable)
+                                    .style("margin-left", "10px")
+                                    .style("overflow","auto");
+
+                    let element1 = element.append("div")
+                        .attr("class","panel panel-info");
+
+                    for(let i=0; i<allow.length; i++) {
+                        let id = 20 + i;
+                        let element2 = element1.append("div")
+                            .attr("class","panel-heading collapsed")
+                            .attr("data-toggle", "collapse")
+                            .attr("data-target","#bar" + id);
+                        element2.append("i")
+                            .attr("class","fa fa-fw fa-chevron-down")
+                            
+                        element2.append("i")
+                            .attr("class","fa fa-fw fa-chevron-right");
+                        
+                        let questionText = questionsText[questions.indexOf(allow[i])];
+                        element2.append("span")
+                            .text(questionText);
+                        element3 = element1.append("div")
+                                .attr("class","panel-body")
+                                .append("div")
+                                .attr("class","collapse")
+                                .attr("id", "bar" + id)
+                                .append("div")
+                                .text(fullQuestionsText[questions.indexOf(allow[i])])
+                                .append("ul")
+                                .style("list-style-type","disc");
+                        
+                        let answers = questionAnswers[questions.indexOf(allow[i])];
+                        for(let j=0; j< answers.length; j++) {
+                            element3.append("li")
+                                .text(answers[j]);
+                        }       
+                    }
+                }                
+
+                // Filter the data as the user clicks on the rectangles in the stacked bar 
+                function filterData(question, choice, csv) {
+
+                    let temp = [];
+
+                    // If the question is filtered for the first time
+                    if(!filterDataQuestionAnswers[question]) {
+                        filterDataQuestionAnswers[question] = [choice]
+                    }
+                    else {
+                        filterDataQuestionAnswers[question].push(choice);
+                    }
+                    
+                    // First selection for filtering the data
+                    if(filteredData.length == 0) {
+                        for(let i=0; i< csv.length; i++) {
+                        
+                                if(csv[i][question].includes(choice)) {
+                                    if(filteredData.indexOf(csv[i]) == -1) {
+                                        filteredData.push(csv[i]);
+                                    } 
+                                }
+                        }
+                    }
+                    else {
+                        // if a second option is selected in the same category we need to handle in different way
+                        // lets say in academics the user has already selected fulltime and again selected parttime from same category
+                        // we need to add more data form the same category (we need to or the choices in same question)
+                        if((filterDataQuestions.indexOf(question) != -1) ) {
+
+
+                            // we need to reconstruct the filter data based on filterDataQuestionAnswers
+                            // it is hard to add the choices at this point from the selection made itself, because that data point might be
+                            // included because of the  selection from other category 
+                            let filterKeys = Object.keys(filterDataQuestionAnswers);
+                            for(let i=0; i< csv.length; i++) {
+                            let filterCount = 0;
+                                for(let j=0; j< filterKeys.length;j++) {
+                                    let length = filterDataQuestionAnswers[filterKeys[j]].length;
+                                    for(let k=0;k< length;k++){
+                                        if(csv[i][filterKeys[j]].includes(filterDataQuestionAnswers[filterKeys[j]][k])) {
+                                            filterCount++;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if(filterCount == filterKeys.length) {
+                                    temp.push(csv[i]);
+                                }
+                                filterCount = 0;
+                            }
+                        }
+                        else {
+                            let count = 0;
+                            for(let i=0; i<filteredData.length; i++) {
+                                if(filteredData[i][question].includes(choice)) {
+                                    temp.push(filteredData[i]);
+                                }
+                            }
+                        }
+
+                        filteredData = temp;
+                    }
+
+                    if(filterDataQuestions.indexOf(question) == -1) {
+                        filterDataQuestions.push(question);
+                    }
+
+                    // Update parallel sets
+                    parallel_sets(filteredData);
+                }
+
+
+                // Add data on unselection of choices
+                function addFilteredData(question, choice, csv) {
+                    let list = filterDataQuestionAnswers[question];
+                    let temp = [];
+                    // removing selection 
+                    filterDataQuestionAnswers[question].splice(list.indexOf(choice), 1);
+
+                    if(filterDataQuestionAnswers[question].length == 0) {
+                        delete filterDataQuestionAnswers[question];
+                    }
+
+                    // we need to reconstruct the filter data based on filterDataQuestionAnswers
+                    // its hard to just add the choices from the selection unmade because that data point might be included
+                    // because of the  selection from other category 
+                    let filterKeys = Object.keys(filterDataQuestionAnswers);
+                        for(let i=0; i< csv.length; i++) {
+                            let filterCount = 0;
+                            for(let j=0; j< filterKeys.length;j++) {
+                                let length = filterDataQuestionAnswers[filterKeys[j]].length;
+                                for(let k=0;k< length;k++){
+                                    if(csv[i][filterKeys[j]].includes(filterDataQuestionAnswers[filterKeys[j]][k])) {
+                                        filterCount++;
+                                        break;
+                                    }
+                                }
+                                    
+                            }
+
+                            if(filterCount == filterKeys.length) {
+                                temp.push(csv[i]);
+                            }
+                            filterCount = 0;
+                        }
+
+                        filteredData = temp;
+                        // Update parallel sets
+                        parallel_sets(filteredData);
+                }
+
+
+                // Drawing parallel sets
+                function parallel_sets(csv3){
+
+                    // Prallel sets can be drawn with a min of 2 categories
+                    if(allow.length < 2) {
+                        return;
+                    }
+
+                    let csv1, textWrap = true;
+                    if(filteredData.length != 0) {
+                        csv1 = filteredData;
+                    }
+                    else {
+                        csv1 = csv3;
+                    }
+
+                    let parallelSetsData=[];
+                    let modifiedSelectedAxis=[];
+                    // Changing the category from Q1 to complete question text
+                    // for parallel sets to show the question text
+                    for(let i=0; i < csv1.length; i++) {
+                        temp = {};
+                        for(let j=0; j< allow.length; j++) {
+                            if(breakAnswers.indexOf(allow[j]) == -1) {
+                                temp[questionsText[questions.indexOf(allow[j])]] = csv1[i][allow[j]];
+                            }
+                        }
+                            parallelSetsData.push(temp);
+                    }
+
+                    for(let i=0 ; i<allow.length;i++) {
+                        if(breakAnswers.indexOf(allow[i]) == -1) {
+                            modifiedSelectedAxis.push(questionsText[questions.indexOf(allow[i])]);
+                        }
+
+                    }
+
+                    // Parallel sets need the selection questions text to draw, if in the selection there are some unsupported categories
+                    // after the removal of unsupported ones if it is still <2 we can draw paralle sets
+                    if(modifiedSelectedAxis.length < 2) {
+                        return;
+                    }
+                    d3.select("#vis").selectAll('svg').remove();
+                    let parasetsHeight = 800;
+                    if(modifiedSelectedAxis.length >= 3) {
+                        parasetsHeight = modifiedSelectedAxis.length * 300 + 100;
+                        
+                    }
+
+                    var chart = d3.parsets()
+                        .height(parasetsHeight)
+                        .width(450)
+                        .dimensions(modifiedSelectedAxis)
+
+                    var vis = d3.select("#vis").append("svg")
+                        .attr("width", chart.height() + 500)
+                        .attr("height", 600)
+                        .append("g") 
+                        .attr("transform","translate(0," + (chart.width()) + ")rotate(-90)" ); // making parallel sets horizontal
+
+                    // parallel sets are drawn here
+                    vis.datum(parallelSetsData).call(chart);
+
+                    vis.selectAll(".category text")
+                        .attr("dx", 5)
+                        .attr("transform", "rotate(90)");
+                    vis.selectAll(".category rect")
+                        .attr("y", 0);
+                    vis.selectAll("text.dimension")
+                        .attr("dy", "1.5em")
+                        .attr("transform", "rotate(90)");
+                    vis.selectAll("text.dimension .sort.alpha")
+                        .attr("x", 0)
+                        .attr("dx", 0)
+                        .attr("dy", "1.5em");
+                    vis.selectAll("text.dimension .sort.size")
+                        .attr("dx", "1em");
+                    
+                    
+
+                    d3.selectAll("div.parsets.tooltip")
+                        .attr("class","parsets d3tooltip");
+                   
+                    $("ul.nav li:last").click(
+                        function() {
+                            if(textWrap){
+                                textWrap = false;
+                                setTimeout(function() {
+                                    d3.selectAll("svg tspan.name")
+                                    .call(wrap, 200);
+                                }, (200));
+                            }
+                        }
+                            
+                    );
+                        
+                }
+
+                // Text wrap there are some questions which have very long text we need to wrap them to not cause overlap in parallel sets
+                function wrap(text, width) {
+                    text.each(function() {
+                        let text = d3.select(this),
+                            words = text.text().split(/\s+/).reverse(),
+                            word,
+                            line = [],
+                            lineNumber = 0,
+                            lineHeight = 0.5, // ems
+                            //y = text.attr("y"),
+                            y = 0,
+                            dy = parseFloat(0.8),
+                            //dy = parseFloat(text.attr("dy")),
+                            tspan = text.text(null).append("tspan").attr("dy", dy + "em");
+                        while (word = words.pop()) {
+                        line.push(word);
+                        tspan.text(line.join(" "));
+                        if (tspan.node().getComputedTextLength() > width) {
+                            line.pop();
+                            tspan.text(line.join(" "));
+                            line = [word];
+                            tspan = text.append("tspan").attr("x",0).attr("dy",  dy + "em").text(word);
+                            lineHeight = lineHeight + 0.4;
+                        }
+                        }
+                    });
+                }
+
+    </script>
+
+</body>
+
+</html>
