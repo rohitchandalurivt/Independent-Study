@@ -20,7 +20,7 @@
         // Functionality based on http://eagereyes.org/parallel-sets
         (function() {
         d3.parsets = function() {
-            var event = d3.dispatch("sortDimensions", "sortCategories"),
+            var event = d3.dispatch("sortDimensions", "sortCategories", "customDragEnd"),
                 dimensions_ = autoDimensions,
                 dimensionFormat = String,
                 tooltip_ = defaultTooltip,
@@ -180,6 +180,7 @@
                             .attr("d", ribbonPath);
                         })
                         .on("dragend", function(d) {
+                        event.customDragEnd(dimensions);
                         dragging = false;
                         unhighlight();
                         var y0 = 45,
@@ -897,6 +898,7 @@
 
             svg {
                 font: 10px sans-serif;
+                display: block;
             }
 
             .axis path,
@@ -930,6 +932,13 @@
             svg tspan {
                 font-family: FontAwesome;
             }
+
+            .stackbarButton {
+                display: block;
+                width: 100px;
+                height: 50px;
+                margin: 15px;
+            }
     </style>
 
 
@@ -939,6 +948,7 @@
     <script>
 
         // Code to toggle the side bar to be hidden and shown
+        // Not working
         $(document).ready(function () {
             $('#sidebarCollapse').on('click', function () {
                 $('#sidebar').toggleClass('active');
@@ -1253,27 +1263,20 @@
               </div>
 
               <ul class="nav nav-tabs">
-                <li class="active"><a data-toggle="tab" href="#home">Stacked Bars</a></li>
-                <li><a data-toggle="tab" href="#menu1">Parallel Sets</a></li>
+                <li class="active"><a data-toggle="tab" href="#home">Distribution Plot</a></li>
               </ul>
             <!--Tabs on the right side of the page-->
               <div class="tab-content">
                 <div id="home" class="tab-pane fade in active">
                     <div style="display: flex;">
                         <!--Stacked bar area-->
-                        <div id="stackedbar">
+                        <div id="distributionPlot">
                         </div>
                         <div id="textBoxArea">
                            
                         </div>
                     </div>
 
-                </div>
-                <div id="menu1" class="tab-pane fade">
-                    <!--Parallel sets-->
-                    <div id="paralles">
-                        <div id="vis" style="margin-top: 10px;"><noscript><img src="parsets.png"></noscript></div>
-                    </div>
                 </div>
               </div>
                 
@@ -1284,8 +1287,8 @@
 
         var csv, csv2;
         // Get data for the portal to show visualizations
-        d3.csv("Url1", function(data1) { 
-            d3.csv("Url2", function(data2) {
+        d3.csv("https://csvfiles194622-test.s3.amazonaws.com/RAW_Data.csv", function(data1) { 
+            d3.csv("https://csvfiles194622-test.s3.amazonaws.com/RAW_Data_M.csv", function(data2) {
                 csv = data1;
                 csv2=data2;
                 startrender();
@@ -1470,6 +1473,9 @@
         var svg,tooltip;
         let windowWidthAvailable = window.screen.width - 250;
         let windowHeightAvailable = window.screen.height - 255;
+        let parallesetsAxisOrder = [];
+        let stackeBarAxis = [];
+        let svgMaxWidth;
 
         function startrender() {
 
@@ -1479,6 +1485,8 @@
                 filterDataQuestions = [];
                 filterDataQuestionAnswers = {};
                 countOfBreakAnswers = [];
+                parallesetsAxisOrder = [];
+                stackeBarAxis=[];
                 let elements = $( "input:checked" );
                 let filters = [];
                 for(let i=0; i< elements.length; i++) {
@@ -1488,15 +1496,15 @@
                 allow = filters;
                 
                 // If applied filters are more than 8 we need more height to render that supports overflow in the page.
-                if(allow.length > 8) {
-                    windowHeightAvailable = (60 * allow.length) + 100; 
-                }
+                //if(allow.length > 8) {
+                windowHeightAvailable = (60 * allow.length) + 100; 
+                //}
                 
                 // In d3 remove the existing svgs before drawing the new ones
-                d3.select("#stackedbar").selectAll('svg').remove();
-                d3.select("#vis").selectAll('svg').remove();
+                d3.select("#distributionPlot").selectAll('svg').remove();
                 d3.select("#textBoxArea").selectAll("*").remove();
-                 svg = d3.select("#stackedbar").append("svg")
+                 svg = d3.select("#distributionPlot").append("svg")
+                    .attr("id","distributionPlotSVG")
                     .attr("width", (windowWidthAvailable * 0.75) + 30)
                     .attr("height", windowHeightAvailable);
 
@@ -1599,6 +1607,26 @@
                     let initial = 30;
                     let renderLater = [];
 
+                    let header = svg.append("text")
+                        .attr("x",30 )
+                        .attr("y",initial + 20 )
+                        .attr("font-family","'Poppins', sans-serif;")
+                        .attr("font-size","30px")
+                        .style("font-size","17px")
+                        .style("fill","#000000");
+
+                    if(allow.length < 1) {
+                        
+                        header.text("Select variables from the filter menu to view the distribution of values in each selected variable.");
+                    }
+                    else {
+                        header
+                        .attr("y","20")
+                        .text("Select values in the distribution plots to filter data in the Parallel Sets .");
+                    }
+
+                    initial  = initial + 20;
+
                     // Drawing rectangles from here
                     for(let i=0; i< allow.length;i++) {
 
@@ -1635,7 +1663,8 @@
                     }
 
                     renderTableArea();
-                    parallel_sets(csv);
+                    parallel_sets(csv, true);
+                    stackbar(csv);
                 }
 
 
@@ -1748,7 +1777,7 @@
                         keys[2] = temp;
                     }
 
-                    let x = 30;
+                    let x = 50;
                     svg.append("text")
                         .attr("x",x )
                         .attr("y",y )
@@ -1954,7 +1983,8 @@
                     }
 
                     // Update parallel sets
-                    parallel_sets(filteredData);
+                    parallel_sets(filteredData, false);
+                    stackbar(filteredData, stackeBarAxis[0], stackeBarAxis[1]);
                 }
 
 
@@ -1994,12 +2024,15 @@
 
                         filteredData = temp;
                         // Update parallel sets
-                        parallel_sets(filteredData);
+                        parallel_sets(filteredData, false);
+                        stackbar(filteredData, stackeBarAxis[0], stackeBarAxis[1]);
                 }
 
 
+                // Parallel sets code reference 
+                //http://bl.ocks.org/igorzilla/3086651
                 // Drawing parallel sets
-                function parallel_sets(csv3){
+                function parallel_sets(csv3, modifyAxisSelection){
 
                     // Prallel sets can be drawn with a min of 2 categories
                     if(allow.length < 2) {
@@ -2015,7 +2048,6 @@
                     }
 
                     let parallelSetsData=[];
-                    let modifiedSelectedAxis=[];
                     // Changing the category from Q1 to complete question text
                     // for parallel sets to show the question text
                     for(let i=0; i < csv1.length; i++) {
@@ -2028,11 +2060,21 @@
                             parallelSetsData.push(temp);
                     }
 
-                    for(let i=0 ; i<allow.length;i++) {
-                        if(breakAnswers.indexOf(allow[i]) == -1) {
-                            modifiedSelectedAxis.push(questionsText[questions.indexOf(allow[i])]);
+                    let modifiedSelectedAxis;
+
+                    if(modifyAxisSelection) {
+                        modifiedSelectedAxis = [];
+                        for(let i=0 ; i<allow.length;i++) {
+                            if(breakAnswers.indexOf(allow[i]) == -1) {
+                                modifiedSelectedAxis.push(questionsText[questions.indexOf(allow[i])]);
+                            }
+
                         }
 
+                        parallesetsAxisOrder = modifiedSelectedAxis;
+                    } 
+                    else {
+                        modifiedSelectedAxis = parallesetsAxisOrder;
                     }
 
                     // Parallel sets need the selection questions text to draw, if in the selection there are some unsupported categories
@@ -2040,26 +2082,46 @@
                     if(modifiedSelectedAxis.length < 2) {
                         return;
                     }
-                    d3.select("#vis").selectAll('svg').remove();
+
+                    d3.select("#parallelsets").remove();
                     let parasetsHeight = 800;
                     if(modifiedSelectedAxis.length >= 3) {
                         parasetsHeight = modifiedSelectedAxis.length * 300 + 100;
                         
                     }
 
-                    var chart = d3.parsets()
+                    let chart = d3.parsets()
                         .height(parasetsHeight)
                         .width(450)
-                        .dimensions(modifiedSelectedAxis)
+                        .dimensions(modifiedSelectedAxis);
+                        let parallelSetsWidth = chart.height() + 400;
 
-                    var vis = d3.select("#vis").append("svg")
-                        .attr("width", chart.height() + 500)
+                        if(svgMaxWidth != parallelSetsWidth) {
+                            svgMaxWidth = parallelSetsWidth;
+                            updateAllSVGWidth();
+                        }
+
+                    let vis = d3.select("#distributionPlot").append("svg")
+                        .attr("id", "parallelsets")
+                        .attr("width", parallelSetsWidth)
                         .attr("height", 600)
                         .append("g") 
                         .attr("transform","translate(0," + (chart.width()) + ")rotate(-90)" ); // making parallel sets horizontal
 
                     // parallel sets are drawn here
                     vis.datum(parallelSetsData).call(chart);
+
+                    chart.on("customDragEnd", function(dimenstionsUpdate){
+                        parallesetsAxisOrder = [];
+                        for(let i=0; i < dimenstionsUpdate.length; i++) {
+                            parallesetsAxisOrder.push(dimenstionsUpdate[i].name);
+                        }
+                        
+                        let axis1 = questions[questionsText.indexOf(parallesetsAxisOrder[0])];
+                        let axis2 = questions[questionsText.indexOf(parallesetsAxisOrder[1])];
+                        stackeBarAxis = [axis1,axis2];
+                        stackbar(csv3, axis1, axis2);
+                    });
 
                     vis.selectAll(".category text")
                         .attr("dx", 5)
@@ -2081,20 +2143,13 @@
                     d3.selectAll("div.parsets.tooltip")
                         .attr("class","parsets d3tooltip");
                    
-                    $("ul.nav li:last").click(
-                        function() {
-                            if(textWrap){
-                                textWrap = false;
-                                setTimeout(function() {
-                                    d3.selectAll("svg tspan.name")
+                   // Text wrap, break long texts to shorter ones for better understandability
+                        setTimeout(function() {
+                                d3.selectAll("svg tspan.name")
                                     .call(wrap, 200);
-                                }, (200));
-                            }
+                            }, (200));
+                                
                         }
-                            
-                    );
-                        
-                }
 
                 // Text wrap there are some questions which have very long text we need to wrap them to not cause overlap in parallel sets
                 function wrap(text, width) {
@@ -2123,6 +2178,280 @@
                         }
                     });
                 }
+
+                // ROund percentages to make the total to 100 so that no overflow or underflow of total happens
+                function roundPercentages(values, sum) {
+                    let percent = [];
+                    //let sum = values.reduce((a, b) => a + b, 0);
+                    let total = 100;
+                    for (let i = 0; i < values.length; i++) {
+                        let rawPercent = sum == 0 ? 0 : values[i] / sum * total;
+                        sum -= values[i];
+                        let roundedPercent = Math.round(rawPercent);
+                        total -= roundedPercent;
+                        percent[i] = roundedPercent;
+                    }
+                    
+                    //console.log(percent);
+                    return percent;
+                }
+
+                // StackedBar Reference
+                // http://bl.ocks.org/mstanaland/6100713
+                // Function to draw stacked bar plot at the end of the page
+                function stackbar(csv4, axis1, axis2) {
+                    let margin = {top: 20, right: 160, bottom: 35, left: 30};
+
+                    let width = windowWidthAvailable - 400;
+                        height = 500 - margin.top - margin.bottom;
+                    
+                    d3.select("#distributionPlot").selectAll('div').remove();
+                    d3.select("#stackbar").remove();
+
+                    
+
+                    let stackElements = [];
+                    if(!axis1 && !axis1) {
+                            let checked = $( "input:checked" );
+                    
+                            if(checked.length < 2) {
+                                return;
+                            }
+                            for(let i=0; i< checked.length && i < 2; i++) {
+                                stackElements.push(checked[i].value);
+                                stackeBarAxis.push(checked[i].value);
+                        }
+                    } else {
+                        stackElements.push(axis1);
+                        stackElements.push(axis2);
+                    }
+
+                    let svg = d3.select("#distributionPlot")
+                    .append("svg")
+                    .attr("id","stackbar")
+                    .attr("width", width + margin.left + margin.right)
+                    .attr("height", height + margin.top + margin.bottom)
+                    .attr("style", "display: inline-block")
+                    .append("g")
+                    .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+                    // Generating data to be supported to stackedbar plot 
+                    let lookup={};
+                    let result1 = [];
+                    let result = [];
+                    let lookup1 = {};
+
+                    for(let i=0; i< csv4.length; i++) {
+                        let name = csv4[i][stackElements[0]];
+	                    let name1 = csv4[i][stackElements[1]];
+
+                        if(!name) {
+                            name = "No answer";
+                        }
+
+                        if(!name1) {
+                            name1 = "No answer";
+                        }
+
+                        if (!(name in lookup)) {
+                            lookup[name] = 1;
+                            result.push(name);
+                        }
+
+                        if (!(name1 in lookup1)) {
+                            lookup1[name1] = 1;
+                            result1.push(name1);
+                        }
+                    }
+
+                    let data = [];
+
+                    for(let i=0; i< result.length;i++) {
+                        let temp = {};
+                        temp["x"] = result[i];
+                        temp["count"] = 0;
+                        for(let j=0; j< result1.length; j++) {
+                            temp[result1[j]] = 0;
+                        }
+
+                        for(let k=0; k< csv4.length;k++) {
+                            let tempValx = csv4[k][stackElements[0]];
+                            
+                            if(!tempValx) {
+                                tempValx = "No answer";
+                            }
+
+                            
+
+                            if(tempValx == result[i]) {
+                                temp["count"]++;
+                                let tempValy = csv4[k][stackElements[1]];
+                                if(!tempValy) {
+                                    tempValy = "No answer";
+                                }
+                                temp[tempValy]++;
+                            }
+                        }
+
+                        data.push(temp);
+                    }
+
+                    for(let i=0; i< data.length ; i++) {
+                        let temp = [];
+                        for(let j=0; j< result1.length; j++) {
+                            temp.push(data[i][result1[j]]);
+                        }
+                        
+                        let percentages = roundPercentages(temp, data[i]["count"]);
+
+                        for(let j=0; j< result1.length; j++) {
+                            data[i][result1[j]] = percentages[j];
+                        }
+                    }
+
+                    let dataset = d3.layout.stack()(result1.map(function(yval) {
+                        return data.map(function(d) {
+                            return {x: d.x, y: +(d[yval])};
+                        });
+                    }));
+
+                    let x = d3.scale.ordinal()
+                    .domain(dataset[0].map(function(d) { return d.x; }))
+                    .rangeRoundBands([10, width-10], 0.02);
+
+                    let y = d3.scale.linear()
+                    .domain([0, d3.max(dataset, function(d) {  return d3.max(d, function(d) { return d.y0 + d.y; });  })])
+                    .range([height, 0]);
+
+                    let stackcolors = ["b33040", "#d25c4d", "#f2b447", "#d9d574","#1f78b4","#a6cee3","#33a02c","#b2df8a","#fb9a99","#fdbf6f","#ff7f00","#cab2d6","#6a3d9a","#ffff99","#b15928", "#d25c4d", "#f2b447", "#d9d574", "blue", "green"];
+
+                    stackcolors = stackcolors.slice(0,result1.length);
+                    let yAxis = d3.svg.axis()
+                    .scale(y)
+                    .orient("left")
+                    .ticks(5)
+                    .tickSize(-width, 0, 0)
+                    .tickFormat( function(d) { return d } );
+
+                    let xAxis = d3.svg.axis()
+                    .scale(x)
+                    //.tickFormat(formatAxis)
+                    .orient("bottom");
+
+                    svg.append("g")
+                    .attr("class", "y axis")
+                    .call(yAxis);
+
+                    svg.append("g")
+                    .attr("class", "x axis")
+                    .attr("transform", "translate(0," + height + ")")
+                    .call(xAxis);
+
+                    // Create groups for each series, rects for each segment 
+                    let groups = svg.selectAll("g.cost")
+                    .data(dataset)
+                    .enter().append("g")
+                    .attr("class", "cost")
+                    .style("fill", function(d, i) { return stackcolors[i]; });
+
+                    let rect = groups.selectAll("rect")
+                    .data(function(d) { return d; })
+                    .enter()
+                    .append("rect")
+                    .attr("x", function(d) { return x(d.x); })
+                    .attr("y", function(d) { return y(d.y0 + d.y); })
+                    .attr("height", function(d) { return y(d.y0) - y(d.y0 + d.y); })
+                    .attr("width", x.rangeBand())
+                    .on("mouseover", function() { tooltip.style("display", null); })
+                    .on("mouseout", function() { tooltip.style("display", "none"); })
+                    .on("mousemove", function(d) {
+                        let xPosition = d3.mouse(this)[0] - 15;
+                        let yPosition = d3.mouse(this)[1] - 25;
+                        tooltip.attr("transform", "translate(" + xPosition + "," + yPosition + ")");
+                        tooltip.select("text").text(Math.round(d.y) + "%");
+                    });
+
+                    let rectText = groups.selectAll("text")
+                    .data(function(d) { return d; })
+                    .enter()
+                    .append("text")
+                    .attr("x", function(d) { return (x(d.x) + (x.rangeBand())/3 ); })
+                    .attr("y", function(d) { return (y(d.y0 + d.y) + (y(d.y0) - y(d.y0 + d.y))/2); })
+                    .style("font-family","Verdana")
+                    .style("font-size",20)
+                    .style("fill", "black")
+                    .text(function(d) { 
+                            if(Math.round(d.y) < 10)
+                                return "";
+                            
+                            return (Math.round(d.y) + "%");
+                        });
+
+
+                    // Draw legend
+                    let legend = svg.selectAll(".legend")
+                    .data(stackcolors)
+                    .enter().append("g")
+                    .attr("class", "legend")
+                    .attr("transform", function(d, i) { return "translate(30," + i * 19 + ")"; });
+                    
+                    legend.append("rect")
+                    .attr("x", width - 18)
+                    .attr("width", 18)
+                    .attr("height", 18)
+                    .style("fill", function(d, i) {return stackcolors.slice().reverse()[i];});
+                    let textWidth = x.rangeBand();
+
+                    legend.append("text")
+                    .attr("x", width + 5)
+                    .attr("y", 9)
+                    .attr("dy", ".35em")
+                    .style("text-anchor", "start")
+                    .text(function(d, i) { 
+                        return result1[result1.length-1-i];
+                    });
+
+
+                    // Prep the tooltip bits, initial display is hidden
+                    let tooltip = svg.append("g")
+                    .attr("class", "d3tooltip")
+                    .style("display", "none");
+                        
+                    tooltip.append("rect")
+                    .attr("width", 30)
+                    .attr("height", 20)
+                    .attr("fill", "white")
+                    .style("opacity", 0.5);
+
+                    tooltip.append("text")
+                    .attr("x", 15)
+                    .attr("dy", "1.2em")
+                    .style("text-anchor", "middle")
+                    .attr("font-size", "12px")
+                    .attr("font-weight", "bold");
+
+                    let div = d3.select("#distributionPlot")
+                    .append("div")
+                    .attr("style","display: inline-block; vertical-align: top;");
+                    
+                    div.append("button")
+                    .attr("type","button")
+                    .attr("class", "btn btn-primary stackbarButton")
+                    .on("click", function() {
+                        stackbar(csv4,stackElements[1],stackElements[0]);
+                    })
+                    .text("Swap Axis");
+                                        
+                }
+
+                // Irregular SVG heights cause problems in different screen sizes.
+                function updateAllSVGWidth() {
+                    d3.select("#distributionPlotSVG").attr("width", svgMaxWidth);
+                    if(windowWidthAvailable < svgMaxWidth) {
+                        d3.select("#home").attr("style","display: block; width:" + (svgMaxWidth+ 200)  + "px" );
+                    }
+                }   
+
 
     </script>
 
